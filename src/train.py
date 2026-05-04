@@ -7,24 +7,27 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tensorboardX import SummaryWriter
+from colorama import Fore, Style, init
 
 from src.dqn import DQN
 from src.experience_buffer import ExperienceBuffer
 from src.agent import Agent
 import src.wrappers as wrappers
 
+init(autoreset=True)
+
 DEFAULT_ENV_NAME = 'ALE/Pong-v5'
 SAVE_FREQUENCY = 10
 MEAN_REWARD_BOUND = 19.0
 GAMMA = 0.99
 BATCH_SIZE = 32
-REPLAY_SIZE = 10_000
+REPLAY_SIZE = 50_000
 REPLAY_START_SIZE = 10_000
 LEARNING_RATE = 1e-4
-SYNC_TARGET_FRAMES = 1000
-EPSILON_DECAY_LAST_FRAME = 150_000
+SYNC_TARGET_FRAMES = 10_000
+EPSILON_DECAY_LAST_FRAME = 1_000_000
 EPSILON_START = 1.0
-EPSILON_FINAL = 0.01
+EPSILON_FINAL = 0.05
 
 
 def calc_loss(batch, net, tgt_net, device="cpu"):
@@ -54,6 +57,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = torch.device('cuda' if args.cuda else "cpu")
+    if args.cuda and device.type != "cuda":
+        print("CUDA requested, but no available. Using CPU.")
 
     env = wrappers.make_env(args.env)
     net = DQN(env.observation_space.shape, env.action_space.n).to(device)
@@ -79,18 +84,22 @@ if __name__ == '__main__':
         except Exception as e:
             raise RuntimeError(f"Failed to load {path}: {e}")
 
-    obj = load_checkpoint(args.model, device)
 
-    if isinstance(obj, dict) and "net" in obj:
-        checkpoint = obj
-        net.load_state_dict(checkpoint["net"])
-        tgt_net.load_state_dict(checkpoint.get("tgt_net", checkpoint["net"]))
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        frame_idx = checkpoint.get("frame_idx", 0)
-        best_m_reward = checkpoint.get("best_m_reward", None)
-        total_rewards = checkpoint.get("total_rewards", [])
+    if args.model is not None:
+        obj = load_checkpoint(args.model, device)
+
+        if isinstance(obj, dict) and "net" in obj:
+            checkpoint = obj
+            net.load_state_dict(checkpoint["net"])
+            tgt_net.load_state_dict(checkpoint.get("tgt_net", checkpoint["net"]))
+            optimizer.load_state_dict(checkpoint["optimizer"])
+            frame_idx = checkpoint.get("frame_idx", 0)
+            best_m_reward = checkpoint.get("best_m_reward", None)
+            total_rewards = checkpoint.get("total_rewards", [])
+        else:
+            net.load_state_dict(obj)
+            tgt_net.load_state_dict(net.state_dict())
     else:
-        net.load_state_dict(obj)
         tgt_net.load_state_dict(net.state_dict())
 
     while True:
@@ -131,7 +140,7 @@ if __name__ == '__main__':
 
             if best_m_reward is None or best_m_reward < m_reward:
                 if best_m_reward is not None:
-                    print(f'Best reward updated {best_m_reward} -> {m_reward}')
+                    print(f'{Style.BRIGHT}{Fore.YELLOW}Best reward updated {best_m_reward:.4f} -> {m_reward:.4f}')
 
                 best_m_reward = m_reward
                 checkpoint['best_m_reward'] = best_m_reward
